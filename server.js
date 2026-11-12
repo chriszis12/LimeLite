@@ -58,6 +58,21 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
 const peers = new Map();   // id -> ws
 const links = new Map();   // cid -> {a,b}  (ids)
+// ---- matchmaking: queues of parties (size 1-2) per mode; match when the sizes fill the lobby ----
+const NEED = { '1v1': 2, '2v2': 4 };
+const queues = { '1v1': [], '2v2': [] };
+function unqueue(ws) { for (const q of Object.values(queues)) { const i = q.findIndex(e => e.ws === ws); if (i >= 0) q.splice(i, 1); } }
+function tryMatch(mode) {
+  const q = queues[mode], need = NEED[mode];
+  q.splice(0, q.length, ...q.filter(e => e.ws.readyState === 1 && e.ws.id));
+  const pick = []; let sum = 0;
+  for (const e of q) { if (sum + e.size <= need) { pick.push(e); sum += e.size; if (sum === need) break; } }
+  if (sum !== need) return;
+  for (const e of pick) q.splice(q.indexOf(e), 1);
+  const host = pick[0];
+  send(host.ws, { k: 'm', role: 'host', mode, need });
+  for (const e of pick.slice(1)) send(e.ws, { k: 'm', role: 'join', mode, host: host.ws.id.replace('limelite-yard-', '') });
+}
 
 server.on('upgrade', (req, sock, head) => {
   if (new URL(req.url, 'http://x').pathname !== '/ws' || wss.clients.size >= MAX_CLIENTS) { sock.destroy(); return; }
@@ -96,6 +111,16 @@ wss.on('connection', ws => {
       return send(ws, { k: 'ok' });
     }
     if (!ws.id) return;
+    if (m.k === 'q') {
+      unqueue(ws);
+      if (!NEED[m.mode]) return;
+      const size = m.size === 2 ? 2 : 1;
+      if (m.mode === '1v1' && size > 1) return send(ws, { k: 'qn', why: 'party' });
+      queues[m.mode].push({ ws, size });
+      send(ws, { k: 'qa', mode: m.mode, n: queues[m.mode].reduce((a, e) => a + e.size, 0) });
+      return tryMatch(m.mode);
+    }
+    if (m.k === 'qc') { unqueue(ws); return send(ws, { k: 'qx' }); }
     const cid = typeof m.cid === 'string' ? m.cid.slice(0, 32) : '';
     if (m.k === 'c') {
       const t = typeof m.to === 'string' && m.to !== ws.id && peers.get(m.to);
@@ -112,6 +137,7 @@ wss.on('connection', ws => {
     }
   });
   ws.on('close', () => {
+    unqueue(ws);
     if (!ws.id) return;
     if (peers.get(ws.id) === ws) { peers.delete(ws.id); dropLinks(ws.id); }
   });
