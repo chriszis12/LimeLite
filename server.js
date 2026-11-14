@@ -49,6 +49,7 @@ const server = http.createServer((req, res) => {
   let body = e.raw;
   if (e.br && /\bbr\b/.test(ae)) { h['content-encoding'] = 'br'; body = e.br; }
   else if (e.gz && /\bgzip\b/.test(ae)) { h['content-encoding'] = 'gzip'; body = e.gz; }
+  h['x-raw'] = e.raw.length; h['access-control-expose-headers'] = 'x-raw';
   h['content-length'] = body.length;
   res.writeHead(200, h);
   res.end(req.method === 'HEAD' ? undefined : body);
@@ -101,7 +102,8 @@ wss.on('connection', ws => {
     if (--ws.tokens < 0) return;
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (!m || typeof m.k !== 'string') return;
-    if (m.k === 'p') return;
+    if (m.k === 'p') { if (typeof m.n === 'number') send(ws, { k: 'q', n: m.n }); return; }
+    if (m.k === 'w') { if (!Array.isArray(m.ids)) return; const on = []; for (const id of m.ids.slice(0, 60)) { if (typeof id !== 'string' || !ID_RE.test(id)) continue; const w = peers.get(id); if (w && w.readyState === 1) on.push(id); } return send(ws, { k: 'o', on }); }
     if (m.k === 'reg') {
       if (ws.id || typeof m.id !== 'string' || !ID_RE.test(m.id)) return ws.close();
       const old = peers.get(m.id);

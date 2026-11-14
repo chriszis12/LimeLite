@@ -11,5 +11,6 @@ root=os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','public')
 os.makedirs(root,exist_ok=True)
 open(os.path.join(root,'game-data.json'),'w',encoding='utf-8').write(data)
 out=src[:m.start()]+m.group(1)+' data-src="game-data.json?v=%s"></script>'%h+src[m.end():]
+out=out.replace("<head>","<head><link rel=\"preload\" href=\"game-data.json?v=%s\" as=\"fetch\" crossorigin>"%h,1)
 open(os.path.join(root,'index.html'),'w',encoding='utf-8').write(out)
 print('ok',len(out)//1024,'KB html',len(data)//1024,'KB data')
